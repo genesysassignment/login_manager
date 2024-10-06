@@ -1,0 +1,47 @@
+{
+    "Comment": "User Management Workflow",
+    "StartAt": "CheckOperation",
+    "States": {
+        "CheckOperation": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.operation",
+                    "StringEquals": "create",
+                    "Next": "CreateUser"
+                },
+                {
+                    "Variable": "$.operation",
+                    "StringEquals": "update",
+                    "Next": "UpdateUser"
+                },
+                {
+                    "Variable": "$.operation",
+                    "StringEquals": "delete",
+                    "Next": "DeleteUser"
+                }
+            ],
+            "Default": "InvalidOperation"
+        },
+        "CreateUser": {
+            "Type": "Task",
+            "Resource": "${CreateUserFunction.Arn}",
+            "End": true
+        },
+        "UpdateUser": {
+            "Type": "Task",
+            "Resource": "${UpdateUserFunction.Arn}",
+            "End": true
+        },
+        "DeleteUser": {
+            "Type": "Task",
+            "Resource": "${DeleteUserFunction.Arn}",
+            "End": true
+        },
+        "InvalidOperation": {
+            "Type": "Fail",
+            "Error": "InvalidOperation",
+            "Cause": "The operation provided is not valid."
+        }
+    }
+}
