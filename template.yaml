@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  geneysis-app with Step Functions for user management
+
+Globals:
+  Function:
+    Timeout: 3
+    MemorySize: 128
+
+Resources:
+  HelloWorldFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/hello_world/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          STEP_FUNCTION_ARN: !Ref UserManagementStepFunction
+      Events:
+        HelloWorld:
+          Type: Api
+          Properties:
+            Path: /hello
+            Method: get
+            RestApiId: !Ref ApiGateway
+            Auth:
+              Authorizer: LambdaAuthorizer
+
+  LambdaAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/auth_lambda/
+      Handler: auth.lambda_handler
+      Runtime: python3.12
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref UsersTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+
+  CreateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/user_management/
+      Handler: create_user.lambda_handler
+      Runtime: python3.12
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref UsersTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+
+  UpdateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/user_management/
+      Handler: update_user.lambda_handler
+      Runtime: python3.12
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref UsersTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+
+  DeleteUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/user_management/
+      Handler: delete_user.lambda_handler
+      Runtime: python3.12
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref UsersTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: Username
+          AttributeType: S
+      KeySchema:
+        - AttributeName: Username
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  #TODO convert to AWS::Serverless::StateMachine
+  UserManagementStepFunction:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      DefinitionString: !Sub |
+        {
+          "Comment": "User Management Workflow",
+          "StartAt": "CheckOperation",
+          "States": {
+            "CheckOperation": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.operation",
+                  "StringEquals": "create",
+                  "Next": "CreateUser"
+                },
+                {
+                  "Variable": "$.operation",
+                  "StringEquals": "update",
+                  "Next": "UpdateUser"
+                },
+                {
+                  "Variable": "$.operation",
+                  "StringEquals": "delete",
+                  "Next": "DeleteUser"
+                }
+              ],
+              "Default": "InvalidOperation"
+            },
+            "CreateUser": {
+              "Type": "Task",
+              "Resource": "${CreateUserFunction.Arn}",
+              "End": true
+            },
+            "UpdateUser": {
+              "Type": "Task",
+              "Resource": "${UpdateUserFunction.Arn}",
+              "End": true
+            },
+            "DeleteUser": {
+              "Type": "Task",
+              "Resource": "${DeleteUserFunction.Arn}",
+              "End": true
+            },
+            "InvalidOperation": {
+              "Type": "Fail",
+              "Error": "InvalidOperation",
+              "Cause": "The operation provided is not valid."
+            }
+          }
+        }
+      RoleArn: !GetAtt StepFunctionsExecutionRole.Arn
+
+  StepFunctionsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "states.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: StepFunctionsExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "lambda:InvokeFunction"
+                Resource:
+                  - !GetAtt CreateUserFunction.Arn
+                  - !GetAtt UpdateUserFunction.Arn
+                  - !GetAtt DeleteUserFunction.Arn
+
+Outputs:
+  HelloWorldApi:
+    Description: "API Gateway endpoint URL for Prod stage for Hello World function"
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod/hello/"
+  HelloWorldFunction:
+    Description: "Hello World Lambda Function ARN"
+    Value: !GetAtt HelloWorldFunction.Arn
+  LambdaAuthorizerFunctionArn:
+    Description: "Lambda Authorizer Function ARN"
+    Value: !GetAtt LambdaAuthorizerFunction.Arn
+  UsersTableName:
+    Description: "DynamoDB table storing users and passwords"
+    Value: !Ref UsersTable
